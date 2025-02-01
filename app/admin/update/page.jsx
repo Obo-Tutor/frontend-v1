@@ -32,13 +32,55 @@ function App() {
     setIsLoaded(true);
     const formData = new FormData();
 
-    // Append all selected files to the FormData object
+  // Add new state for validation
+  const [isValidating, setIsValidating] = useState(false);
+  const MAX_FILE_SIZE = 250 * 1024 * 1024; // 250MB in bytes
+  const UPLOAD_TIMEOUT = 300000; // 5 minutes timeout
+
+  const validateFiles = (files) => {
     for (let i = 0; i < files.length; i++) {
-      formData.append("files", files[i]); // Ensure the field name is 'files'
+      if (files[i].size > MAX_FILE_SIZE) {
+        toast.error(`File ${files[i].name} exceeds 250MB limit`);
+        return false;
+      }
+      if (!files[i].type.includes('pdf')) {
+        toast.error(`File ${files[i].name} is not a PDF`);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleFileChange = (e) => {
+    setIsValidating(true);
+    const selectedFiles = e.target.files;
+    if (validateFiles(selectedFiles)) {
+      setFiles(selectedFiles);
+    } else {
+      e.target.value = null; // Reset file input
+      setFiles([]);
+    }
+    setIsValidating(false);
+  };
+
+  const handleFileUpload = async () => {
+    if (!files.length) {
+      toast.error("Please select files to upload");
+      return;
+    }
+
+    setUploadResponse("");
+    setIsLoaded(true);
+    const formData = new FormData();
+
+    for (let i = 0; i < files.length; i++) {
+      formData.append("files", files[i]);
     }
 
     try {
-      // Make POST request to the FastAPI backend
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT);
+
       const response = await axios.post(
         process.env.NEXT_PUBLIC_DOMAIN_NAME_MODEL + "/upload/",
         formData,
@@ -46,15 +88,45 @@ function App() {
           headers: {
             "Content-Type": "multipart/form-data",
           },
+          signal: controller.signal,
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+            // You can add a progress state and UI if needed
+          },
         }
       );
 
-      // Set the response state to display feedback
+      clearTimeout(timeoutId);
       setUploadResponse(response.data.message);
       setUploadedFiles(response.data.files);
+      toast.success("Files uploaded successfully");
+
     } catch (error) {
       console.error("Error uploading files:", error);
-      toast.error("Failed to upload files");
+      
+      if (error.name === 'AbortError') {
+        toast.error("Upload timeout - Please try again");
+      } else if (error.response) {
+        switch (error.response.status) {
+          case 413:
+            toast.error("Files too large for server");
+            break;
+          case 415:
+            toast.error("Unsupported file type");
+            break;
+          case 500:
+            toast.error("Server error processing files");
+            break;
+          default:
+            toast.error(`Upload failed: ${error.response.data.message || 'Unknown error'}`);
+        }
+      } else if (error.request) {
+        toast.error("No response from server - Check your connection");
+      } else {
+        toast.error("Failed to upload files");
+      }
 
       setUploadResponse("Failed to upload files");
     } finally {

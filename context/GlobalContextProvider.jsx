@@ -21,6 +21,31 @@ const globalContext = createContext({
   setIsLogged: () => {},
 });
 
+// Add axios interceptor setup
+axios.interceptors.request.use(
+  (config) => {
+    // Add common headers or authentication
+    if (localStorage.getItem("token")) {
+      config.headers.Authorization = `Bearer ${localStorage.getItem("token")}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
+
 function GlobalContextProvider({ children }) {
   const router = useRouter();
   const [userId, setUserId] = useState(null);
@@ -33,18 +58,20 @@ function GlobalContextProvider({ children }) {
   useEffect(() => {
     const fetchChats = async () => {
       try {
-        console.log("userId", userId);
         const response = await axios.get(
           process.env.NEXT_PUBLIC_DOMAIN_NAME_BACKEND + `/chatbox/user`,
           {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
+            timeout: 5000, // 5 second timeout
           }
         );
-        setChats(response.data); // Access the data after the promise resolves
+        setChats(response.data);
       } catch (error) {
         console.error("Error fetching chatboxes:", error);
+        if (error.code === 'ECONNABORTED') {
+          toast.error("Request timeout - Please try again");
+        } else {
+          toast.error("Failed to fetch chats");
+        }
       }
     };
 
